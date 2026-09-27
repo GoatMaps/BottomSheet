@@ -97,8 +97,10 @@ internal struct BottomSheetView<HContent: View, MContent: View>: View {
                 self.configuration.animation,
                 value: self.bottomSheetPosition
             )
+            // While the finger is down the sheet must follow it directly; animating each drag tick makes the
+            // sheet lag behind and its content wobble. The release snap is still animated.
             .animation(
-                self.configuration.animation,
+                self.isDragging ? nil : self.configuration.animation,
                 value: self.translation
             )
 #if !os(macOS)

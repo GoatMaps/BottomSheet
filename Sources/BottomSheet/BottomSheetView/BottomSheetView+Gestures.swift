@@ -50,6 +50,9 @@ internal extension BottomSheetView {
                 // Dismiss the keyboard on dragging/scrolling
                 self.endEditing()
             }
+            .updating(self.$isDragging) { _, gestureState, _ in
+                gestureState = true
+            }
             .onEnded { value in
                 if value.translation.height < 0 && self.bottomSheetPosition.isTop {
                     // Notify the ScrollView that the user ended scrolling via dragging
