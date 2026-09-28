@@ -9,8 +9,13 @@ import SwiftUI
 
 internal extension BottomSheetView {
     func dragGesture(with geometry: GeometryProxy) -> some Gesture {
-        DragGesture()
+        // Global coordinates: the views carrying the gesture move with the sheet, so local ones would feed back
+        DragGesture(coordinateSpace: .global)
             .onChanged { value in
+                // Dismiss the keyboard once when the drag starts
+                if self.lastDragValue == nil {
+                    self.endEditing()
+                }
                 self.lastDragValue = value
 
                 // Perform custom onChanged action
@@ -18,8 +23,6 @@ internal extension BottomSheetView {
                 
                 // Update translation; on iPad floating and Mac the drag direction is reversed
                 self.translation = self.isIPadFloatingOrMac ? -value.translation.height : value.translation.height
-                // Dismiss the keyboard on drag
-                self.endEditing()
             }
             // Set isDragging flag to true while user is dragging
             // The value is reset to false when dragging is stopped or cancelled
@@ -30,7 +33,7 @@ internal extension BottomSheetView {
     
 #if !os(macOS)
     func appleScrollViewDragGesture(with geometry: GeometryProxy) -> some Gesture {
-        DragGesture()
+        DragGesture(coordinateSpace: .global)
             .onChanged { value in
                 if self.bottomSheetPosition.isTop && value.translation.height < 0 {
                     // Notify the ScrollView that the user is scrolling
