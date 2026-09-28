@@ -56,7 +56,9 @@ internal extension BottomSheetView {
         // and currently not dragging
         .frame(
             width: self.width(with: geometry),
-            height: self.bottomSheetPosition.isDynamic && self.translation == 0 ? nil : self.height(with: geometry),
+            height: self.bottomSheetPosition.isDynamic && !self.isDraggingWithOffset && self.translation == 0
+                ? nil
+                : self.layoutHeight(with: geometry),
             alignment: self.isIPadFloatingOrMac ? .bottom : .top
         )
         // Clip BottomSheet for transition to work correctly for iPad and Mac
@@ -65,6 +67,8 @@ internal extension BottomSheetView {
         .background(
             self.bottomSheetBackground(with: geometry)
         )
+        // Follow the finger by moving the sheet rather than resizing it
+        .offset(y: self.dragOffset(with: geometry))
         // On iPad floating and Mac the BottomSheet has a padding
         .padding(
             self.isIPadFloatingOrMac ? 10 : 0

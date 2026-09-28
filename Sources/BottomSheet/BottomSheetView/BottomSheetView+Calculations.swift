@@ -119,10 +119,27 @@ internal extension BottomSheetView {
         }
     }
     
+    // While dragging on iPhone (and iPad not floating), the sheet is laid out once at its tallest and moved with
+    // an offset, so its content isn't laid out again on every drag tick
+    var isDraggingWithOffset: Bool {
+        !self.isIPadFloatingOrMac && (self.isDragging || self.translation != 0)
+    }
+    
+    // The height the BottomSheet is laid out at
+    func layoutHeight(with geometry: GeometryProxy) -> CGFloat {
+        self.isDraggingWithOffset ? self.maxBottomSheetHeight(with: geometry) : self.height(with: geometry)
+    }
+    
+    // How far the laid out BottomSheet is moved down to sit where the finger has dragged it
+    func dragOffset(with geometry: GeometryProxy) -> CGFloat {
+        self.isDraggingWithOffset ? self.maxBottomSheetHeight(with: geometry) - self.height(with: geometry) : 0
+    }
+    
     // For iPad and Mac
     func maxMainContentHeight(with geometry: GeometryProxy) -> CGFloat? {
         if self.bottomSheetPosition.isDynamic && self.dynamicMainContentHeight < max(
-            self.maxBottomSheetHeight(with: geometry) - self.translation - self.headerContentHeight - (
+            self.maxBottomSheetHeight(with: geometry) - (self.isDraggingWithOffset ? 0 : self.translation)
+                - self.headerContentHeight - (
                 self.configuration.isResizable && self.configuration.isDragIndicatorShown ? 20 : 0
             ),
             0
@@ -133,7 +150,7 @@ internal extension BottomSheetView {
             // The max height of the main content is the height of the BottomSheet
             // without the header and drag indicator
             return max(
-                self.height(with: geometry) - self.headerContentHeight - (
+                self.layoutHeight(with: geometry) - self.headerContentHeight - (
                     self.configuration.isResizable && self.configuration.isDragIndicatorShown ? 20 : 0
                 ),
                 0
