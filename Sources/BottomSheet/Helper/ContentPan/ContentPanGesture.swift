@@ -14,6 +14,8 @@ import UIKit
 /// it. Every other swipe moves the sheet, and the scroll view is held still. A downward swipe on a scroll view that is
 /// already scrolled to the top also moves the sheet, so a fully open sheet can be pulled down from its content.
 internal struct ContentPanGesture: UIViewRepresentable {
+    /// Switching it off cancels a pan in progress
+    let isEnabled: Bool
     /// Whether the sheet is at its highest position, the only one where the content can scroll
     let isFullyOpen: Bool
     /// The vertical translation of the pan, in points
@@ -25,6 +27,7 @@ internal struct ContentPanGesture: UIViewRepresentable {
     }
 
     func updateUIView(_ view: ContentPanView, context: Context) {
+        view.isEnabled = self.isEnabled
         view.isFullyOpen = self.isFullyOpen
         view.onChanged = self.onChanged
         view.onEnded = self.onEnded
@@ -38,6 +41,15 @@ internal struct ContentPanGesture: UIViewRepresentable {
 /// Sits behind the main content to mark out its area. The recognizer is attached to the root view, which the content's
 /// UIKit views are inside of, and only takes touches that start within this view's bounds.
 internal final class ContentPanView: UIView, UIGestureRecognizerDelegate {
+    /// A touch held still this long is a long press (a context menu, or lifting an item to drag and drop it), so
+    /// moving it afterwards doesn't move the sheet
+    private static let longPressDuration: TimeInterval = 0.4
+
+    var isEnabled = true {
+        didSet {
+            self.panGesture.isEnabled = self.isEnabled
+        }
+    }
     var isFullyOpen = false
     var onChanged: (CGFloat) -> Void = { _ in }
     var onEnded: (CGFloat) -> Void = { _ in }
@@ -55,8 +67,10 @@ internal final class ContentPanView: UIView, UIGestureRecognizerDelegate {
 
     private var mode: Mode = .sheet
     private weak var scrollView: UIScrollView?
-    /// Where the scroll view is held while the sheet moves
+    /// Where the scroll view is held while the sheet moves, from the top of its content. Its top inset grows when the
+    /// sheet is dragged under the status bar, and the content has to stay put rather than slide under it.
     private var heldContentOffset: CGPoint = .zero
+    private var touchStart: TimeInterval = 0
     /// The pan translation when the sheet started moving, for a pan that scrolled first
     private var sheetStartTranslation: CGFloat = 0
     private var lastTranslation: CGFloat = 0
@@ -89,12 +103,29 @@ internal final class ContentPanView: UIView, UIGestureRecognizerDelegate {
     // MARK: UIGestureRecognizerDelegate
 
     func gestureRecognizer(_ gestureRecognizer: UIGestureRecognizer, shouldReceive touch: UITouch) -> Bool {
-        self.window != nil && self.bounds.contains(touch.location(in: self))
+        guard self.window != nil, self.bounds.contains(touch.location(in: self)) else {
+            return false
+        }
+        // Content often runs on under a tab bar, which keeps its own touches
+        var view = touch.view
+        while let current = view {
+            if current is UITabBar {
+                return false
+            }
+            view = current.superview
+        }
+        if gestureRecognizer.numberOfTouches == 0 {
+            self.touchStart = touch.timestamp
+        }
+        return true
     }
 
     override func gestureRecognizerShouldBegin(_ gestureRecognizer: UIGestureRecognizer) -> Bool {
         guard gestureRecognizer === self.panGesture else {
             return super.gestureRecognizerShouldBegin(gestureRecognizer)
+        }
+        if ProcessInfo.processInfo.systemUptime - self.touchStart >= Self.longPressDuration {
+            return false
         }
         // Horizontal swipes are left to the content (swipe actions, horizontal scrolling, the back swipe)
         let velocity = self.panGesture.velocity(in: nil)
@@ -157,16 +188,20 @@ internal final class ContentPanView: UIView, UIGestureRecognizerDelegate {
         scrollView.panGestureRecognizer.isEnabled = false
         scrollView.panGestureRecognizer.isEnabled = true
         var offset = scrollView.contentOffset
-        offset.y = max(offset.y, -scrollView.adjustedContentInset.top)
+        offset.y = max(offset.y + scrollView.adjustedContentInset.top, 0)
         self.heldContentOffset = offset
-        scrollView.setContentOffset(offset, animated: false)
+        self.holdScrollView()
     }
 
     private func holdScrollView() {
-        guard let scrollView = self.scrollView, scrollView.contentOffset != self.heldContentOffset else {
+        guard let scrollView = self.scrollView else {
             return
         }
-        scrollView.setContentOffset(self.heldContentOffset, animated: false)
+        var offset = self.heldContentOffset
+        offset.y -= scrollView.adjustedContentInset.top
+        if scrollView.contentOffset != offset {
+            scrollView.setContentOffset(offset, animated: false)
+        }
     }
 
     private func isAtTop(_ scrollView: UIScrollView) -> Bool {
