@@ -195,6 +195,10 @@ internal extension BottomSheetView {
                 // UIKit. Always there and only switched off, so the content keeps its identity (and state) when the
                 // sheet stops being resizable.
                     .background(self.contentPanGesture(with: geometry))
+                // A touch on an empty part of the content (a Spacer, say) would fall through to the sheet background,
+                // whose drag gesture moves the sheet too: both would apply the drag on release, landing the sheet
+                // twice as far as it was dragged. Stop such touches at the content, where only the pan sees them.
+                    .background(self.isContentPanEnabled ? Color.clear.contentShape(Rectangle()) : nil)
 #endif
             }
         }
@@ -274,10 +278,14 @@ internal extension BottomSheetView {
     }
     
 #if !os(macOS)
+    /// Whether the main content drags the sheet with `ContentPanGesture`
+    var isContentPanEnabled: Bool {
+        self.configuration.isContentDragEnabled && self.configuration.isResizable && !self.isIPadFloatingOrMac
+    }
+
     func contentPanGesture(with geometry: GeometryProxy) -> some View {
         ContentPanGesture(
-            isEnabled: self.configuration.isContentDragEnabled && self.configuration.isResizable &&
-                !self.isIPadFloatingOrMac,
+            isEnabled: self.isContentPanEnabled,
             isFullyOpen: self.isFullyOpen(with: geometry),
             onChanged: { translation in
                 if !self.isContentPanning {
