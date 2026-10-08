@@ -56,7 +56,13 @@ internal final class ContentPanView: UIView, UIGestureRecognizerDelegate {
             }
         }
     }
-    var isFullyOpen = false
+    var isFullyOpen = false {
+        didSet {
+            if oldValue && !self.isFullyOpen {
+                self.scrollTouchedScrollViewsToTop()
+            }
+        }
+    }
     var onChanged: (CGFloat) -> Void = { _ in }
     var onEnded: (CGFloat) -> Void = { _ in }
 
@@ -84,6 +90,8 @@ internal final class ContentPanView: UIView, UIGestureRecognizerDelegate {
     private var mode: Mode = .sheet
     /// The scroll view under the touch
     private weak var scrollView: UIScrollView?
+    /// Scroll views touches have landed on, to scroll back to the top when the sheet stops being fully open
+    private let touchedScrollViews = NSHashTable<UIScrollView>.weakObjects()
     /// The scroll view whose pan is switched off for the current touch
     private weak var suppressedScrollView: UIScrollView?
     /// Whether the scroll view is held at the top of its content while the sheet moves
@@ -163,11 +171,24 @@ internal final class ContentPanView: UIView, UIGestureRecognizerDelegate {
         self.touchStart = touch.timestamp
         self.releaseScrollView()
         self.scrollView = self.verticalScrollView(above: touch.view)
+        if let scrollView = self.scrollView {
+            self.touchedScrollViews.add(scrollView)
+        }
         // Unless the sheet is fully open and the content taller than it, the content doesn't scroll at all, whether
         // or not the touch goes on to move the sheet
         if let scrollView = self.scrollView, !self.canScroll(scrollView) {
             self.suppress(scrollView)
         }
+    }
+
+    /// Below fully open the content can't be scrolled, so it would be stuck wherever it was scrolled to
+    private func scrollTouchedScrollViewsToTop() {
+        for scrollView in self.touchedScrollViews.allObjects where scrollView.window != nil && !self.isAtTop(scrollView) {
+            var offset = scrollView.contentOffset
+            offset.y = -scrollView.adjustedContentInset.top
+            scrollView.setContentOffset(offset, animated: true)
+        }
+        self.touchedScrollViews.removeAllObjects()
     }
 
     private func canScroll(_ scrollView: UIScrollView) -> Bool {
