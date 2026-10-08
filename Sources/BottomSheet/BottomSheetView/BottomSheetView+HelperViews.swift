@@ -181,6 +181,12 @@ internal extension BottomSheetView {
                     self.appleScrollView(with: geometry)
 #endif
                 }
+            } else if self.configuration.isContentDragEnabled && self.configuration.isResizable && !self.isIPadFloatingOrMac {
+#if !os(macOS)
+                // A SwiftUI gesture doesn't see touches on a UIKit backed ScrollView or List, so pan with UIKit
+                self.mainContent
+                    .background(self.contentPanGesture(with: geometry))
+#endif
             } else {
                 // Main content
                 self.mainContent
@@ -268,6 +274,25 @@ internal extension BottomSheetView {
     }
     
 #if !os(macOS)
+    func contentPanGesture(with geometry: GeometryProxy) -> some View {
+        ContentPanGesture(
+            isFullyOpen: self.isFullyOpen(with: geometry),
+            onChanged: { translation in
+                if !self.isContentPanning {
+                    self.isContentPanning = true
+                    self.endEditing()
+                }
+                self.translation = translation
+            },
+            onEnded: { translation in
+                self.dragPositionSwitch(with: geometry, translationHeight: translation)
+                self.translation = 0
+                self.isContentPanning = false
+                self.endEditing()
+            }
+        )
+    }
+
     func appleScrollView(with geometry: GeometryProxy) -> some View {
         UIScrollViewWrapper(
             isScrollEnabled: self.$isScrollEnabled,

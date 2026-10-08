@@ -122,9 +122,18 @@ internal extension BottomSheetView {
     // While dragging on iPhone (and iPad not floating), the sheet is laid out once at its tallest and moved with
     // an offset, so its content isn't laid out again on every drag tick
     var isDraggingWithOffset: Bool {
-        !self.isIPadFloatingOrMac && (self.isDragging || self.translation != 0)
+        !self.isIPadFloatingOrMac && (self.isDragging || self.isContentPanning || self.translation != 0)
     }
     
+    // Whether the BottomSheet is at its highest position, the only one where `contentPan` lets the content scroll
+    func isFullyOpen(with geometry: GeometryProxy) -> Bool {
+        let maxHeight = self.maxBottomSheetHeight(with: geometry)
+        guard let highest = self.switchablePositions.compactMap({ $0.asScreenHeight(with: maxHeight) }).max() else {
+            return true
+        }
+        return self.currentBottomSheetHeight(with: geometry) >= highest - 0.5
+    }
+
     // The height the BottomSheet is laid out at
     func layoutHeight(with geometry: GeometryProxy) -> CGFloat {
         self.isDraggingWithOffset ? self.maxBottomSheetHeight(with: geometry) : self.height(with: geometry)

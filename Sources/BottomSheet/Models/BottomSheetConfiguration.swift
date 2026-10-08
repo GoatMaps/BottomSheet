@@ -43,7 +43,7 @@ internal class BottomSheetConfiguration: Equatable {
     var dragIndicatorColor: Color = Color.tertiaryLabel
     var dragPositionSwitchAction: ((
         GeometryProxy,
-        DragGesture.Value
+        CGFloat
     ) -> Void)?
     var isAppleScrollBehaviorEnabled: Bool = false
     var isBackgroundBlurEnabled: Bool = false
