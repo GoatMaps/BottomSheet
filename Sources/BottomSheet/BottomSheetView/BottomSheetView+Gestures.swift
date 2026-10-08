@@ -74,7 +74,7 @@ internal extension BottomSheetView {
                     // Switch the position based on the translation and screen height
                     self.dragPositionSwitch(
                         with: geometry,
-                        value: value
+                        translationHeight: value.translation.height
                     )
                     
                     // Reset translation, because the dragging ended

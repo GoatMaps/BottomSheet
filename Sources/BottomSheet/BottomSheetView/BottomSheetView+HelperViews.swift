@@ -187,9 +187,15 @@ internal extension BottomSheetView {
                 // Make the main content drag-able if content drag is enabled
                 // highPriorityGesture is required to make dragging the bottom sheet work even when user starts dragging on buttons or other pressable items
                     .highPriorityGesture(
-                        self.configuration.isContentDragEnabled && self.configuration.isResizable ?
-                        self.dragGesture(with: geometry) : nil
+                        self.configuration.isContentDragEnabled && self.configuration.isResizable &&
+                        self.isIPadFloatingOrMac ? self.dragGesture(with: geometry) : nil
                     )
+#if !os(macOS)
+                // Elsewhere a SwiftUI gesture doesn't see touches on a UIKit backed ScrollView or List, so pan with
+                // UIKit. Always there and only switched off, so the content keeps its identity (and state) when the
+                // sheet stops being resizable.
+                    .background(self.contentPanGesture(with: geometry))
+#endif
             }
         }
         // Get dynamic main content size
@@ -268,6 +274,27 @@ internal extension BottomSheetView {
     }
     
 #if !os(macOS)
+    func contentPanGesture(with geometry: GeometryProxy) -> some View {
+        ContentPanGesture(
+            isEnabled: self.configuration.isContentDragEnabled && self.configuration.isResizable &&
+                !self.isIPadFloatingOrMac,
+            isFullyOpen: self.isFullyOpen(with: geometry),
+            onChanged: { translation in
+                if !self.isContentPanning {
+                    self.isContentPanning = true
+                    self.endEditing()
+                }
+                self.translation = translation
+            },
+            onEnded: { translation in
+                self.dragPositionSwitch(with: geometry, translationHeight: translation)
+                self.translation = 0
+                self.isContentPanning = false
+                self.endEditing()
+            }
+        )
+    }
+
     func appleScrollView(with geometry: GeometryProxy) -> some View {
         UIScrollViewWrapper(
             isScrollEnabled: self.$isScrollEnabled,

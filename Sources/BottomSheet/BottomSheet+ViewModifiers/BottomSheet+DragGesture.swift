@@ -35,7 +35,7 @@ public extension BottomSheet {
     
     /// Replaces the action that will be performed when the user drags the sheet down.
     ///
-    /// The `GeometryProxy` and `DragGesture.Value` parameter can be used for calculations.
+    /// The `GeometryProxy` and the vertical translation of the drag can be used for calculations.
     /// You need to switch the positions, account for the reversed drag direction on iPad and Mac
     /// and dismiss the keyboard yourself.
     /// Also the `swipeToDismiss` and `flickThrough` features are triggered via this method.
@@ -49,7 +49,7 @@ public extension BottomSheet {
     /// - Returns: A BottomSheet with a custom on drag indicator action.
     func dragPositionSwitchAction(_ action: @escaping (
         GeometryProxy,
-        DragGesture.Value
+        CGFloat
     ) -> Void) -> BottomSheet {
         self.configuration.dragPositionSwitchAction = action
         return self

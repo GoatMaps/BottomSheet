@@ -10,6 +10,8 @@ import SwiftUI
 internal struct BottomSheetView<HContent: View, MContent: View>: View {
     @GestureState var isDragging: Bool = false
     @State var lastDragValue: DragGesture.Value?
+    // Whether the main content is being panned, see `ContentPanGesture`
+    @State var isContentPanning: Bool = false
 
     // For iPhone landscape and iPad support
 #if !os(macOS)
@@ -72,7 +74,7 @@ internal struct BottomSheetView<HContent: View, MContent: View>: View {
                     // Switch the position based on the translation and screen height
                     self.dragPositionSwitch(
                         with: geometry,
-                        value: lastDragValue!
+                        translationHeight: lastDragValue!.translation.height
                     )
                     
                     // Reset translation and last drag value, because the dragging ended
@@ -100,7 +102,7 @@ internal struct BottomSheetView<HContent: View, MContent: View>: View {
             // While the finger is down the sheet must follow it directly; animating each drag tick makes the
             // sheet lag behind and its content wobble. The release snap is still animated.
             .animation(
-                self.isDragging ? nil : self.configuration.animation,
+                self.isDragging || self.isContentPanning ? nil : self.configuration.animation,
                 value: self.translation
             )
 #if !os(macOS)
