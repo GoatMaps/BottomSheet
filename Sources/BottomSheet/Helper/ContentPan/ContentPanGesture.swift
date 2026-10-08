@@ -5,6 +5,7 @@
 #if !os(macOS)
 import SwiftUI
 import UIKit
+import UIKit.UIGestureRecognizerSubclass
 
 /// Drags the BottomSheet by its main content, even when the content is (or contains) a ScrollView or List.
 ///
@@ -38,8 +39,8 @@ internal struct ContentPanGesture: UIViewRepresentable {
     }
 }
 
-/// Sits behind the main content to mark out its area. The recognizer is attached to the root view, which the content's
-/// UIKit views are inside of, and only takes touches that start within this view's bounds.
+/// Sits behind the main content to mark out its area. The recognizers are attached to the root view, which the
+/// content's UIKit views are inside of, and only take touches that start within this view's bounds.
 internal final class ContentPanView: UIView, UIGestureRecognizerDelegate {
     /// A touch held still this long is a long press (a context menu, or lifting an item to drag and drop it), so
     /// moving it afterwards doesn't move the sheet
@@ -48,6 +49,11 @@ internal final class ContentPanView: UIView, UIGestureRecognizerDelegate {
     var isEnabled = true {
         didSet {
             self.panGesture.isEnabled = self.isEnabled
+            self.touchGesture.isEnabled = self.isEnabled
+            if !self.isEnabled {
+                // A touch in progress won't report lifting any more
+                self.releaseScrollView()
+            }
         }
     }
     var isFullyOpen = false
@@ -65,11 +71,23 @@ internal final class ContentPanView: UIView, UIGestureRecognizerDelegate {
         return gesture
     }()
 
+    /// Sees every touch on the content, including ones that never become a pan, to keep the scroll view under it
+    /// from scrolling when it shouldn't
+    private lazy var touchGesture: TouchGestureRecognizer = {
+        let gesture = TouchGestureRecognizer()
+        gesture.delegate = self
+        gesture.onBegan = { [weak self] touch in self?.touchBegan(touch) }
+        gesture.onEnded = { [weak self] in self?.releaseScrollView() }
+        return gesture
+    }()
+
     private var mode: Mode = .sheet
+    /// The scroll view under the touch
     private weak var scrollView: UIScrollView?
-    /// Where the scroll view is held while the sheet moves, from the top of its content. Its top inset grows when the
-    /// sheet is dragged under the status bar, and the content has to stay put rather than slide under it.
-    private var heldContentOffset: CGPoint = .zero
+    /// The scroll view whose pan is switched off for the current touch
+    private weak var suppressedScrollView: UIScrollView?
+    /// Whether the scroll view is held at the top of its content while the sheet moves
+    private var isHoldingAtTop = false
     private var touchStart: TimeInterval = 0
     /// The pan translation when the sheet started moving, for a pan that scrolled first
     private var sheetStartTranslation: CGFloat = 0
@@ -94,10 +112,13 @@ internal final class ContentPanView: UIView, UIGestureRecognizerDelegate {
             return
         }
         host.addGestureRecognizer(self.panGesture)
+        host.addGestureRecognizer(self.touchGesture)
     }
 
     func uninstall() {
+        self.releaseScrollView()
         self.panGesture.view?.removeGestureRecognizer(self.panGesture)
+        self.touchGesture.view?.removeGestureRecognizer(self.touchGesture)
     }
 
     // MARK: UIGestureRecognizerDelegate
@@ -113,9 +134,6 @@ internal final class ContentPanView: UIView, UIGestureRecognizerDelegate {
                 return false
             }
             view = current.superview
-        }
-        if gestureRecognizer.numberOfTouches == 0 {
-            self.touchStart = touch.timestamp
         }
         return true
     }
@@ -139,6 +157,38 @@ internal final class ContentPanView: UIView, UIGestureRecognizerDelegate {
         true
     }
 
+    // MARK: Touches
+
+    private func touchBegan(_ touch: UITouch) {
+        self.touchStart = touch.timestamp
+        self.releaseScrollView()
+        self.scrollView = self.verticalScrollView(above: touch.view)
+        // Unless the sheet is fully open and the content taller than it, the content doesn't scroll at all, whether
+        // or not the touch goes on to move the sheet
+        if let scrollView = self.scrollView, !self.canScroll(scrollView) {
+            self.suppress(scrollView)
+        }
+    }
+
+    private func canScroll(_ scrollView: UIScrollView) -> Bool {
+        self.isFullyOpen && self.overflows(scrollView)
+    }
+
+    /// Switches the scroll view's pan off for the rest of the touch, which also cancels a scroll in progress
+    private func suppress(_ scrollView: UIScrollView) {
+        guard self.suppressedScrollView !== scrollView else {
+            return
+        }
+        self.releaseScrollView()
+        scrollView.panGestureRecognizer.isEnabled = false
+        self.suppressedScrollView = scrollView
+    }
+
+    private func releaseScrollView() {
+        self.suppressedScrollView?.panGestureRecognizer.isEnabled = true
+        self.suppressedScrollView = nil
+    }
+
     // MARK: Pan
 
     @objc private func handlePan(_ gesture: UIPanGestureRecognizer) {
@@ -147,9 +197,8 @@ internal final class ContentPanView: UIView, UIGestureRecognizerDelegate {
 
         switch gesture.state {
         case .began:
-            self.scrollView = self.verticalScrollView(at: gesture.location(in: gesture.view), in: gesture.view)
             self.lastTranslation = translation
-            if let scrollView = self.scrollView, self.isFullyOpen, self.overflows(scrollView),
+            if let scrollView = self.scrollView, self.canScroll(scrollView),
                !(self.isAtTop(scrollView) && gesture.velocity(in: nil).y > 0) {
                 self.mode = .scroll
             } else {
@@ -163,16 +212,16 @@ internal final class ContentPanView: UIView, UIGestureRecognizerDelegate {
             }
             self.lastTranslation = translation
             if self.mode == .sheet {
-                self.holdScrollView()
+                self.holdAtTop()
                 self.onChanged(translation - self.sheetStartTranslation)
             }
         case .ended, .cancelled, .failed:
             if self.mode == .sheet {
-                self.holdScrollView()
+                self.holdAtTop()
                 self.onEnded(translation - self.sheetStartTranslation)
             }
             self.mode = .sheet
-            self.scrollView = nil
+            self.isHoldingAtTop = false
         default:
             break
         }
@@ -181,24 +230,22 @@ internal final class ContentPanView: UIView, UIGestureRecognizerDelegate {
     private func startMovingSheet(at translation: CGFloat) {
         self.mode = .sheet
         self.sheetStartTranslation = translation
-        guard let scrollView = self.scrollView else {
+        guard let scrollView = self.scrollView, self.suppressedScrollView !== scrollView else {
+            // Already still, and left where it is
             return
         }
-        // Toggling the scroll view's pan cancels it, so it doesn't scroll or decelerate when the finger lifts
-        scrollView.panGestureRecognizer.isEnabled = false
-        scrollView.panGestureRecognizer.isEnabled = true
-        var offset = scrollView.contentOffset
-        offset.y = max(offset.y + scrollView.adjustedContentInset.top, 0)
-        self.heldContentOffset = offset
-        self.holdScrollView()
+        // It was scrolling and is at its top: stop it there, so it doesn't bounce or decelerate
+        self.suppress(scrollView)
+        self.isHoldingAtTop = true
+        self.holdAtTop()
     }
 
-    private func holdScrollView() {
-        guard let scrollView = self.scrollView else {
+    private func holdAtTop() {
+        guard self.isHoldingAtTop, let scrollView = self.scrollView else {
             return
         }
-        var offset = self.heldContentOffset
-        offset.y -= scrollView.adjustedContentInset.top
+        var offset = scrollView.contentOffset
+        offset.y = -scrollView.adjustedContentInset.top
         if scrollView.contentOffset != offset {
             scrollView.setContentOffset(offset, animated: false)
         }
@@ -213,10 +260,11 @@ internal final class ContentPanView: UIView, UIGestureRecognizerDelegate {
             scrollView.bounds.height + 1
     }
 
-    /// The innermost scroll view under the point that isn't a horizontal one, the one a vertical swipe would scroll
-    private func verticalScrollView(at point: CGPoint, in host: UIView?) -> UIScrollView? {
-        var view = host?.hitTest(point, with: nil)
-        while let current = view, current !== host {
+    /// The innermost scroll view at or above the view that isn't a horizontal one, the one a vertical swipe would
+    /// scroll
+    private func verticalScrollView(above view: UIView?) -> UIScrollView? {
+        var view = view
+        while let current = view {
             if let scrollView = current as? UIScrollView, scrollView.isScrollEnabled,
                !(scrollView.contentSize.width > scrollView.bounds.width + 1 && !self.overflows(scrollView)) {
                 return scrollView
@@ -224,6 +272,51 @@ internal final class ContentPanView: UIView, UIGestureRecognizerDelegate {
             view = current.superview
         }
         return nil
+    }
+}
+
+/// Reports a touch going down and every touch lifting, without ever recognizing or getting in the way of the touches
+private final class TouchGestureRecognizer: UIGestureRecognizer {
+    var onBegan: (UITouch) -> Void = { _ in }
+    var onEnded: () -> Void = {}
+    private var touchCount = 0
+
+    override init(target: Any?, action: Selector?) {
+        super.init(target: target, action: action)
+        self.cancelsTouchesInView = false
+        self.delaysTouchesEnded = false
+    }
+
+    convenience init() {
+        self.init(target: nil, action: nil)
+    }
+
+    override func touchesBegan(_ touches: Set<UITouch>, with event: UIEvent) {
+        if self.touchCount == 0, let touch = touches.first {
+            self.onBegan(touch)
+        }
+        self.touchCount += touches.count
+    }
+
+    override func touchesEnded(_ touches: Set<UITouch>, with event: UIEvent) {
+        self.touchesLifted(touches)
+    }
+
+    override func touchesCancelled(_ touches: Set<UITouch>, with event: UIEvent) {
+        self.touchesLifted(touches)
+    }
+
+    private func touchesLifted(_ touches: Set<UITouch>) {
+        self.touchCount -= touches.count
+        if self.touchCount <= 0 {
+            self.onEnded()
+            self.state = .failed
+        }
+    }
+
+    override func reset() {
+        super.reset()
+        self.touchCount = 0
     }
 }
 #endif
